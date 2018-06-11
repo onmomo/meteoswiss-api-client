@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/ian-kent/go-log/appenders"
 	"github.com/ian-kent/go-log/layout"
 	"github.com/ian-kent/go-log/log"
@@ -35,7 +36,7 @@ type Day struct {
 
 type Hazards struct {
 	Wind          *Hazard
-	Thunderstorm  *Hazard
+	Thunderstorm  []Hazard
 	Snow          *Hazard
 	Rain          *Hazard
 	SlipperyRoads *Hazard
@@ -92,10 +93,8 @@ func initLogger() {
 }
 
 func read(postalCode string, host string, protocol string) {
-	log.Info("Getting data for '%s' ...", postalCode)
-
-	// TODO use current timestamp
-	response, err := http.Get("http://www.meteoschweiz.admin.ch/product/output/danger/version__20180609_2026/de/dangers.json")
+	dangersAPI := resolveDangersAPI()
+	response, err := http.Get(dangersAPI)
 	if err != nil {
 		log.Error("The HTTP request failed with error %s\n", err)
 	} else {
@@ -104,10 +103,43 @@ func read(postalCode string, host string, protocol string) {
 		var dangers Dangers
 		json.Unmarshal([]byte(data), &dangers)
 
-		log.Info(fmt.Sprintf("Warnlevel is: %d", dangers.Days["20180609_24h"].Lakes[0].Warnlevel))
+		now := time.Now().Local()
+		currentDateFormat := now.Format("20060102") + "_24h"
+		log.Info(fmt.Sprintf("Warnlevel is: %s", dangers.Days[currentDateFormat].Hazards.Thunderstorm[0].Description))
 	}
 
 	log.Info("Closing Meteo Api Client, bye bye.")
 
 	os.Exit(0)
+}
+
+func resolveDangersAPI() string {
+	responseHTML, err := http.Get("http://www.meteoschweiz.admin.ch/content/meteoswiss/de/home.mobile.meteo-products--alarm.html")
+	if err != nil {
+		// TODO proper error handling
+		log.Error("The HTTP request failed with error %s\n", err)
+		os.Exit(99)
+		return ""
+	} else {
+		doc, err := goquery.NewDocumentFromReader(responseHTML.Body)
+		if err != nil {
+			log.Fatal(err)
+			os.Exit(99)
+		}
+
+		result := doc.Find("div[id$='dangers-map'][data-json-url]").Map(func(i int, s *goquery.Selection) (result string) {
+			dangersAPI, ok := s.Attr("data-json-url")
+			if ok {
+				log.Info(fmt.Sprintf("DangersAPI resolved: %s", dangersAPI))
+				return dangersAPI
+			} else {
+				// TODO proper error handling
+				log.Fatal("Looks like something has changed, the API parsing is broken!")
+				return dangersAPI
+			}
+		})
+
+		apiURL := "http://www.meteoschweiz.admin.ch" + result[0]
+		return apiURL
+	}
 }
