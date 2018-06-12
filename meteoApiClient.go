@@ -5,54 +5,49 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/ian-kent/go-log/appenders"
 	"github.com/ian-kent/go-log/layout"
 	"github.com/ian-kent/go-log/log"
 )
 
-type Dangers struct {
-	Config Config
-	Days   map[string]Day
+type Weather struct {
+	Warnings []Warnings
 }
 
-type Config struct {
-	Name      string
-	Language  string
-	Version   string
-	Timestamp Timestamp
+type Warnings struct {
+	HtmlText  string
+	Ordering  string
+	Outlook   bool
+	Text      string
+	ValidFrom Timestamp
+	ValidTo   Timestamp
+	WarnLevel int
+	WarnType  WarnType
 }
 
-type Day struct {
-	Hazards   Hazards
-	Lakes     []Hazard
-	Airfields []Hazard
-}
+type WarnType int
 
-type Hazards struct {
-	Wind          *Hazard
-	Thunderstorm  []Hazard
-	Snow          *Hazard
-	Rain          *Hazard
-	SlipperyRoads *Hazard
-	HeatWave      *Hazard
-	Frost         *Hazard
-}
-
-type Hazard struct {
-	Description string
-	Onset       Timestamp
-	Expires     Timestamp
-	Areas       []int
-	IsOutlook   bool
-	Warnlevel   int
-	Name        string
-}
+// id 2 = rain
+// id xx = thunderstorm
+// id 10 = forecast fire
+// id 11 = flood
+// id xx = wind
+// id xx = slippery-roads
+// id xx = frost
+// id xx = heat-wave
+const (
+	Thunderstorm WarnType = 1
+	Rain         WarnType = 2
+	Flood        WarnType = 11
+	ForestFire   WarnType = 10
+)
 
 type Timestamp struct {
 	time.Time
@@ -77,8 +72,8 @@ func (t *Timestamp) UnmarshalJSON(b []byte) error {
 }
 
 func main() {
-	postalCodePtr := flag.String("plz", "8000", "a CH postal code")
-	hostPtr := flag.String("host", "10.0.1.2:9999", "the host that will receive the data")
+	postalCodePtr := flag.String("plz", "9500", "a CH postal code")
+	hostPtr := flag.String("host", "10.0.1.2:9990", "the host that will receive the data")
 	protocolPtr := flag.String("protocol", "udp", "the protocol for the host connection (tcp, udp and IP networks)")
 	flag.Parse()
 	initLogger()
@@ -93,19 +88,46 @@ func initLogger() {
 }
 
 func read(postalCode string, host string, protocol string) {
-	dangersAPI := resolveDangersAPI()
-	response, err := http.Get(dangersAPI)
+	weatherByPostalCodeAPI, err := resolveWeatherByPostalCodeAPI(postalCode)
+	if err != nil {
+		log.Error("Could not resolve weatherByPostalCodeApi %s\n", err)
+		os.Exit(99)
+	}
+	log.Debug("Requesting weather from %s ...", weatherByPostalCodeAPI)
+	weatherResponse, err := http.Get(weatherByPostalCodeAPI)
 	if err != nil {
 		log.Error("The HTTP request failed with error %s\n", err)
+	} else if weatherResponse.StatusCode != 200 {
+		log.Warn("Unable to retrieve the weather for postalcode '%s'\n", postalCode)
+		os.Exit(404)
 	} else {
-		data, _ := ioutil.ReadAll(response.Body)
-		log.Info(string(data))
-		var dangers Dangers
-		json.Unmarshal([]byte(data), &dangers)
+		data, _ := ioutil.ReadAll(weatherResponse.Body)
+		log.Debug(fmt.Sprintf("Weather JSON response: %s", data))
+		var weather Weather
+		json.Unmarshal([]byte(data), &weather)
 
-		now := time.Now().Local()
-		currentDateFormat := now.Format("20060102") + "_24h"
-		log.Info(fmt.Sprintf("Warnlevel is: %s", dangers.Days[currentDateFormat].Hazards.Thunderstorm[0].Description))
+		if len(weather.Warnings) > 0 {
+			log.Info("Opening %s connection to %s ...", protocol, host)
+			conn, err := net.Dial(protocol, host)
+			if err != nil {
+				log.Error("Couldn't open %s connection to %s.", protocol, host)
+				log.Fatal(err)
+				os.Exit(-3000)
+			}
+
+			log.Info(fmt.Sprintf("Following warnings were reported for postal code: %s", postalCode))
+			for _, warning := range weather.Warnings {
+				log.Info(fmt.Sprintf("Warnlevel: %d, Warntype: %d: %s", warning.WarnLevel, warning.WarnType, warning.Text))
+				if warning.WarnLevel >= 3 && warning.WarnType == Thunderstorm {
+					log.Info(fmt.Sprintf("Send type %d alert, level %d.", warning.WarnType, warning.WarnLevel))
+					conn.Write([]byte("hazard:1"))
+				}
+			}
+
+			conn.Close()
+		} else {
+			log.Info("No warnings found for postal code %s, all good.", postalCode)
+		}
 	}
 
 	log.Info("Closing Meteo Api Client, bye bye.")
@@ -113,33 +135,14 @@ func read(postalCode string, host string, protocol string) {
 	os.Exit(0)
 }
 
-func resolveDangersAPI() string {
-	responseHTML, err := http.Get("http://www.meteoschweiz.admin.ch/content/meteoswiss/de/home.mobile.meteo-products--alarm.html")
+func resolveWeatherByPostalCodeAPI(postalCode string) (string, error) {
+	weatherByPostalCode, err := url.Parse("https://app-prod-ws.meteoswiss-app.ch/v1/plzDetail")
 	if err != nil {
-		// TODO proper error handling
-		log.Error("The HTTP request failed with error %s\n", err)
-		os.Exit(99)
-		return ""
-	} else {
-		doc, err := goquery.NewDocumentFromReader(responseHTML.Body)
-		if err != nil {
-			log.Fatal(err)
-			os.Exit(99)
-		}
-
-		result := doc.Find("div[id$='dangers-map'][data-json-url]").Map(func(i int, s *goquery.Selection) (result string) {
-			dangersAPI, ok := s.Attr("data-json-url")
-			if ok {
-				log.Info(fmt.Sprintf("DangersAPI resolved: %s", dangersAPI))
-				return dangersAPI
-			} else {
-				// TODO proper error handling
-				log.Fatal("Looks like something has changed, the API parsing is broken!")
-				return dangersAPI
-			}
-		})
-
-		apiURL := "http://www.meteoschweiz.admin.ch" + result[0]
-		return apiURL
+		return "", err
 	}
+	query := weatherByPostalCode.Query()
+	query.Set("plz", postalCode+"00")
+	weatherByPostalCode.RawQuery = query.Encode()
+
+	return weatherByPostalCode.String(), nil
 }
