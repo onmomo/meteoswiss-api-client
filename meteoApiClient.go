@@ -34,8 +34,8 @@ type Warnings struct {
 
 type WarnType int
 
+// id 1 = thunderstorm
 // id 2 = rain
-// id xx = thunderstorm
 // id 10 = forecast fire
 // id 11 = flood
 // id xx = wind
@@ -118,7 +118,7 @@ func read(postalCode string, host string, protocol string) {
 			log.Info(fmt.Sprintf("Following warnings were reported for postal code: %s", postalCode))
 			for _, warning := range weather.Warnings {
 				log.Info(fmt.Sprintf("Warnlevel: %d, Warntype: %d: %s", warning.WarnLevel, warning.WarnType, warning.Text))
-				if warning.WarnLevel >= 3 && warning.WarnType == Thunderstorm {
+				if !warning.Outlook && warning.WarnLevel >= 3 && warning.WarnType == Thunderstorm {
 					log.Info(fmt.Sprintf("Send type %d alert, level %d.", warning.WarnType, warning.WarnLevel))
 					conn.Write([]byte("hazard:1"))
 				}
