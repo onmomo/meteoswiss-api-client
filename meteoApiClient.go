@@ -73,8 +73,8 @@ func (t *Timestamp) UnmarshalJSON(b []byte) error {
 
 func main() {
 	postalCodePtr := flag.String("plz", "9500", "a CH postal code")
-	hostPtr := flag.String("host", "10.0.1.2:9990", "the host that will receive the data")
-	protocolPtr := flag.String("protocol", "udp", "the protocol for the host connection (tcp, udp and IP networks)")
+	hostPtr := flag.String("targetHost", "10.0.1.2:9990", "the host that will receive the data")
+	protocolPtr := flag.String("protocol", "udp", "the protocol for the target host connection (tcp, udp and IP networks)")
 	flag.Parse()
 	initLogger()
 	read(*postalCodePtr, *hostPtr, *protocolPtr)
@@ -130,7 +130,7 @@ func read(postalCode string, host string, protocol string) {
 		}
 	}
 
-	log.Info("Closing Meteo Api Client, bye bye.")
+	log.Info("Closing Meteoswiss Api Client, bye bye.")
 
 	os.Exit(0)
 }
