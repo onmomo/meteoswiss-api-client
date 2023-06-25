@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -82,7 +82,7 @@ func main() {
 
 func initLogger() {
 	logger := log.Logger()
-	logger.SetAppender(appenders.RollingFile("meteoswiss-api.log", true))
+	logger.SetAppender(appenders.Console())
 	appender := logger.Appender()
 	appender.SetLayout(layout.Pattern("%d %p - %m%n"))
 }
@@ -101,7 +101,7 @@ func read(postalCode string, host string, protocol string) {
 		log.Warn("Unable to retrieve the weather for postalcode '%s'\n", postalCode)
 		os.Exit(404)
 	} else {
-		data, _ := ioutil.ReadAll(weatherResponse.Body)
+		data, _ := io.ReadAll(weatherResponse.Body)
 		log.Debug(fmt.Sprintf("Weather JSON response: %s", data))
 		var weather Weather
 		json.Unmarshal([]byte(data), &weather)
@@ -118,7 +118,7 @@ func read(postalCode string, host string, protocol string) {
 			log.Info(fmt.Sprintf("Following warnings were reported for postal code: %s", postalCode))
 			for _, warning := range weather.Warnings {
 				log.Info(fmt.Sprintf("Warnlevel: %d, Warntype: %d, Outlook: %t: %s", warning.WarnLevel, warning.WarnType, warning.Outlook, warning.Text))
-				if warning.Outlook == false && warning.WarnLevel >= 3 && warning.WarnType == Thunderstorm {
+				if !warning.Outlook && warning.WarnLevel >= 3 && warning.WarnType == Thunderstorm {
 					log.Info(fmt.Sprintf("Send type %d alert, level %d.", warning.WarnType, warning.WarnLevel))
 					conn.Write([]byte("hazard:1"))
 				}
