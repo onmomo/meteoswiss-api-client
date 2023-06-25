@@ -12,3 +12,6 @@
 *.out
 meteoswiss-api.log
 meteoswiss-api-client
+
+# IDE's
+.idea
