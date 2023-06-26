@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,13 +9,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ian-kent/go-log/appenders"
 	"github.com/ian-kent/go-log/layout"
 	"github.com/ian-kent/go-log/log"
+	"github.com/procyon-projects/chrono"
 )
 
 type Weather struct {
@@ -71,13 +73,32 @@ func (t *Timestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+var wg sync.WaitGroup
+
 func main() {
 	postalCodePtr := flag.String("plz", "9500", "a CH postal code")
 	hostPtr := flag.String("targetHost", "10.0.1.2:9990", "the host that will receive the data")
 	protocolPtr := flag.String("protocol", "udp", "the protocol for the target host connection (tcp, udp and IP networks)")
+	cronExpressionPtr := flag.String("cron", "0 0/10 * * * *", "cron expression to configure the hazard poll interval. Defaults to every 10 minutes")
 	flag.Parse()
 	initLogger()
-	read(*postalCodePtr, *hostPtr, *protocolPtr)
+
+	wg.Add(1)
+	taskScheduler := chrono.NewDefaultTaskScheduler()
+	_, err := taskScheduler.ScheduleWithCron(func(ctx context.Context) {
+		_, err := read(*postalCodePtr, *hostPtr, *protocolPtr)
+		if err != nil {
+			log.Warn("Meteoswiss Api Client scheduled run failed", err)
+		}
+		log.Info("Meteoswiss Api Client task ran successfully, bye bye.")
+	}, *cronExpressionPtr)
+
+	if err == nil {
+		log.Info("Meteoswiss Api Client task has been scheduled ..")
+	} else {
+		log.Warn("Meteoswiss Api Client scheduled task initialization failed", err)
+	}
+	wg.Wait()
 }
 
 func initLogger() {
@@ -87,19 +108,17 @@ func initLogger() {
 	appender.SetLayout(layout.Pattern("%d %p - %m%n"))
 }
 
-func read(postalCode string, host string, protocol string) {
+func read(postalCode string, host string, protocol string) (bool, error) {
 	weatherByPostalCodeAPI, err := resolveWeatherByPostalCodeAPI(postalCode)
 	if err != nil {
-		log.Error("Could not resolve weatherByPostalCodeApi %s\n", err)
-		os.Exit(99)
+		return false, fmt.Errorf("could not resolve weatherByPostalCodeApi %s", err)
 	}
 	log.Debug("Requesting weather from %s ...", weatherByPostalCodeAPI)
 	weatherResponse, err := http.Get(weatherByPostalCodeAPI)
 	if err != nil {
-		log.Error("The HTTP request failed with error %s\n", err)
+		return false, fmt.Errorf("the HTTP request failed with error %s", err)
 	} else if weatherResponse.StatusCode != 200 {
-		log.Warn("Unable to retrieve the weather for postalcode '%s'\n", postalCode)
-		os.Exit(404)
+		return false, fmt.Errorf("unable to retrieve the weather for postalcode '%s'", postalCode)
 	} else {
 		data, _ := io.ReadAll(weatherResponse.Body)
 		log.Debug(fmt.Sprintf("Weather JSON response: %s", data))
@@ -110,9 +129,8 @@ func read(postalCode string, host string, protocol string) {
 			log.Info("Opening %s connection to %s ...", protocol, host)
 			conn, err := net.Dial(protocol, host)
 			if err != nil {
-				log.Error("Couldn't open %s connection to %s.", protocol, host)
 				log.Fatal(err)
-				os.Exit(-3000)
+				return false, fmt.Errorf("couldn't open %s connection to %s", protocol, host)
 			}
 
 			log.Info(fmt.Sprintf("Following warnings were reported for postal code: %s", postalCode))
@@ -125,14 +143,13 @@ func read(postalCode string, host string, protocol string) {
 			}
 
 			conn.Close()
+
+			return true, nil
 		} else {
 			log.Info("No warnings found for postal code %s, all good.", postalCode)
+			return true, nil
 		}
 	}
-
-	log.Info("Closing Meteoswiss Api Client, bye bye.")
-
-	os.Exit(0)
 }
 
 func resolveWeatherByPostalCodeAPI(postalCode string) (string, error) {
