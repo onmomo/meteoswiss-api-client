@@ -1,4 +1,4 @@
-FROM golang:1.20.5 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.20.5 AS builder
 # smoke test to verify if golang is available
 RUN go version
 
@@ -6,11 +6,15 @@ ARG PROJECT_VERSION
 
 COPY . /go/src/github.com/onmomo/meteoswiss-api-client/
 WORKDIR /go/src/github.com/onmomo/meteoswiss-api-client/
+
+ARG TARGETOS
+ARG TARGETARCH
+
 RUN set -Eeux && \
     go mod download && \
     go mod verify
 
-RUN GOOS=linux GOARCH=amd64 \
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build \
     -trimpath \
     -ldflags="-w -s -X 'main.Version=${PROJECT_VERSION}'" \
