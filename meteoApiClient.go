@@ -94,7 +94,7 @@ func main() {
 	}, *cronExpressionPtr)
 
 	if err == nil {
-		log.Info("Meteoswiss Api Client task has been scheduled ..")
+		log.Info("Meteoswiss Api Client task has been scheduled with expression %s..", *cronExpressionPtr)
 	} else {
 		log.Warn("Meteoswiss Api Client scheduled task initialization failed", err)
 	}
@@ -132,6 +132,8 @@ func read(postalCode string, host string, protocol string) (bool, error) {
 				log.Fatal(err)
 				return false, fmt.Errorf("couldn't open %s connection to %s", protocol, host)
 			}
+
+			conn.Write([]byte("hazard:1"))
 
 			log.Info(fmt.Sprintf("Following warnings were reported for postal code: %s", postalCode))
 			for _, warning := range weather.Warnings {
