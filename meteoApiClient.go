@@ -133,8 +133,6 @@ func read(postalCode string, host string, protocol string) (bool, error) {
 				return false, fmt.Errorf("couldn't open %s connection to %s", protocol, host)
 			}
 
-			conn.Write([]byte("hazard:1"))
-
 			log.Info(fmt.Sprintf("Following warnings were reported for postal code: %s", postalCode))
 			for _, warning := range weather.Warnings {
 				log.Info(fmt.Sprintf("Warnlevel: %d, Warntype: %d, Outlook: %t: %s", warning.WarnLevel, warning.WarnType, warning.Outlook, warning.Text))
