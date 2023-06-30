@@ -13,12 +13,9 @@ ARG TARGETARCH
 COPY . /go/src/github.com/onmomo/meteoswiss-api-client/
 WORKDIR /go/src/github.com/onmomo/meteoswiss-api-client/
 
-ARG TARGETOS
-ARG TARGETARCH
-
 RUN set -Eeux && \
     go mod download && \
-    go mod verify \
+    go mod verify
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
